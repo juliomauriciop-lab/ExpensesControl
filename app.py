@@ -77,8 +77,10 @@ with tab1:
                             model = genai.GenerativeModel('gemini-3.8-flash')
                             image_parts = [{"mime_type": uploaded_file.type, "data": uploaded_file.getvalue()}]
                             
+                            # Se agregó una instrucción estricta sobre los caracteres de control
                             prompt = f"""
-                            Analyze this receipt image. Extract the information and output ONLY a valid JSON object with this exact structure, with no extra text or markdown formatting:
+                            Analyze this receipt image. Extract the information and output ONLY a valid JSON object with this exact structure, with no extra text or markdown formatting. 
+                            IMPORTANT: Do NOT include literal newlines, tabs, or unescaped control characters inside the string values:
                             {{
                                 "merchant": "Name of the store",
                                 "total_amount": 0.0,
@@ -100,7 +102,8 @@ with tab1:
                             if text_response.endswith("```"):
                                 text_response = text_response[:-3]
                                 
-                            extracted_data = json.loads(text_response.strip())
+                            # Se agregó strict=False para tolerar caracteres de control invisibles
+                            extracted_data = json.loads(text_response.strip(), strict=False)
                             
                             items = extracted_data.get("items", [])
                             df_items = pd.DataFrame(items)
