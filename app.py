@@ -11,8 +11,8 @@ if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 DATA_FILE = "expenses.csv"
-PERSONS = ["Mariel", "Mauricio"]
-ASSIGN_OPTIONS = ["Mariel", "Mauricio", "Split"]
+PERSONS = ["Mariel", "Mauricio"] # Used for 'Who Paid'
+ASSIGN_OPTIONS = ["Mariel", "Mauricio", "Mariel & Mauricio (split)"] # Used for 'Person'
 CATEGORIES = ["Health", "Household items", "Leisure", "Rent", "Studies", "Transport", "Clothes", "Food", "Other"]
 
 # Card mapping dictionary. Add new cards here in the future
@@ -25,7 +25,7 @@ CARD_OWNERS = {
 def load_data():
     if os.path.exists(DATA_FILE):
         return pd.read_csv(DATA_FILE)
-    return pd.DataFrame(columns=["Date", "Person", "Category", "Amount", "Merchant", "Note", "Card Number", "Who Paid", "Split"])
+    return pd.DataFrame(columns=["Date", "Person", "Category", "Amount", "Merchant", "Note", "Card Number", "Who Paid"])
 
 def save_expense(data):
     df = load_data()
@@ -56,7 +56,6 @@ if "receipt_data" not in st.session_state:
 if "receipt_items" not in st.session_state:
     st.session_state.receipt_items = None
 
-# Updated tabs
 tab1, tab2, tab3, tab4 = st.tabs(["Add Expense", "Dashboard", "History (Edit Data)", "Export"])
 
 with tab1:
@@ -110,7 +109,7 @@ with tab1:
                                 if "category" not in df_items.columns:
                                     df_items["category"] = "Other"
                                 df_items["category"] = df_items["category"].apply(lambda x: x if x in CATEGORIES else "Other")
-                                df_items["Assign To"] = "Split"
+                                df_items["Assign To"] = "Mariel & Mauricio (split)"
                             
                             st.session_state.receipt_processed = True
                             st.session_state.receipt_data = extracted_data
@@ -127,7 +126,6 @@ with tab1:
             merchant_val = st.session_state.receipt_data.get('merchant', '')
             card_val = st.session_state.receipt_data.get('card_number', '')
             
-            # Auto-detect who paid based on card number
             detected_payer = detect_who_paid(card_val)
             payer_index = PERSONS.index(detected_payer) if detected_payer in PERSONS else 0
             
@@ -143,7 +141,6 @@ with tab1:
                 
             st.write("✏️ **Double-click any cell below to change the Category or who the item belongs to:**")
             
-            # Bulk Assign Buttons
             col_btn1, col_btn2, col_btn3 = st.columns(3)
             if col_btn1.button("Assign All to Mauricio"):
                 st.session_state.receipt_items["Assign To"] = "Mauricio"
@@ -152,10 +149,9 @@ with tab1:
                 st.session_state.receipt_items["Assign To"] = "Mariel"
                 st.rerun()
             if col_btn3.button("Assign All to Split"):
-                st.session_state.receipt_items["Assign To"] = "Split"
+                st.session_state.receipt_items["Assign To"] = "Mariel & Mauricio (split)"
                 st.rerun()
                 
-            # Interactive editable table
             edited_df = st.data_editor(
                 st.session_state.receipt_items,
                 column_config={
@@ -168,17 +164,15 @@ with tab1:
                 use_container_width=True
             )
             
-            # Update session state with edits so they persist before saving
             st.session_state.receipt_items = edited_df
             
-            # Dynamic Summary Calculations
             st.subheader("3. Summary Before Saving")
             total_mariel = 0.0
             total_mauricio = 0.0
             
             for _, row in edited_df.iterrows():
                 p = float(row.get("price", 0.0))
-                assign = row.get("Assign To", "Split")
+                assign = row.get("Assign To", "Mariel & Mauricio (split)")
                 if assign == "Mariel":
                     total_mariel += p
                 elif assign == "Mauricio":
@@ -196,13 +190,19 @@ with tab1:
                     item_name = row.get("name", "Item")
                     price = float(row.get("price", 0.0))
                     cat = row.get("category", "Other")
-                    assign = row.get("Assign To", "Split")
+                    assign = row.get("Assign To", "Mariel & Mauricio (split)")
                     
-                    if assign == "Split":
-                        expenses_to_save.append({"Date": exp_date, "Person": "Mariel", "Category": cat, "Amount": price/2, "Merchant": merchant, "Note": item_name, "Card Number": card_number_input, "Who Paid": who_paid, "Split": True})
-                        expenses_to_save.append({"Date": exp_date, "Person": "Mauricio", "Category": cat, "Amount": price/2, "Merchant": merchant, "Note": item_name, "Card Number": card_number_input, "Who Paid": who_paid, "Split": True})
-                    else:
-                        expenses_to_save.append({"Date": exp_date, "Person": assign, "Category": cat, "Amount": price, "Merchant": merchant, "Note": item_name, "Card Number": card_number_input, "Who Paid": who_paid, "Split": False})
+                    # Se añade una sola fila por ítem sin importar a quién se asigna
+                    expenses_to_save.append({
+                        "Date": exp_date, 
+                        "Person": assign, 
+                        "Category": cat, 
+                        "Amount": price, 
+                        "Merchant": merchant, 
+                        "Note": item_name, 
+                        "Card Number": card_number_input, 
+                        "Who Paid": who_paid
+                    })
                 
                 save_multiple_expenses(expenses_to_save)
                 
@@ -218,33 +218,29 @@ with tab1:
             col1, col2 = st.columns(2)
             with col1:
                 exp_date = st.date_input("Date", date.today())
-                person = st.selectbox("Person (Who does this expense belong to?)", PERSONS)
+                person = st.selectbox("Person (Who does this expense belong to?)", ASSIGN_OPTIONS)
                 category = st.selectbox("Category", CATEGORIES)
                 merchant = st.text_input("Merchant")
                 note = st.text_input("Note")
             with col2:
                 amount = st.number_input("Amount", min_value=0.0, step=0.01)
                 card_number = st.text_input("Card Number / Payment Method")
-                
-                # Auto-select based on card if user types it manually
                 who_paid = st.selectbox("Who Paid?", PERSONS)
-                split = st.checkbox("Split 50/50 between Mariel and Mauricio?")
                 
             submitted = st.form_submit_button("Save Expense")
             
             if submitted:
-                # Si el usuario llenó la tarjeta y el combobox de Who Paid sigue siendo el predeterminado, se podría sobrescribir, 
-                # pero dejamos lo que haya elegido.
-                if split:
-                    amount_per_person = amount / 2
-                    for p in PERSONS:
-                        expense = {"Date": exp_date, "Person": p, "Category": category, "Amount": amount_per_person, 
-                                   "Merchant": merchant, "Note": note, "Card Number": card_number, "Who Paid": who_paid, "Split": True}
-                        save_expense(expense)
-                else:
-                    expense = {"Date": exp_date, "Person": person, "Category": category, "Amount": amount, 
-                               "Merchant": merchant, "Note": note, "Card Number": card_number, "Who Paid": who_paid, "Split": False}
-                    save_expense(expense)
+                expense = {
+                    "Date": exp_date, 
+                    "Person": person, 
+                    "Category": category, 
+                    "Amount": amount, 
+                    "Merchant": merchant, 
+                    "Note": note, 
+                    "Card Number": card_number, 
+                    "Who Paid": who_paid
+                }
+                save_expense(expense)
                 st.success("Expense saved successfully!")
 
 with tab2:
@@ -252,6 +248,7 @@ with tab2:
     df = load_data()
     if not df.empty:
         st.subheader("Total Expenses per Person")
+        # El gráfico ahora mostrará 3 barras: Mariel, Mauricio, y Mariel & Mauricio (split)
         st.bar_chart(df.groupby("Person")["Amount"].sum())
         
         st.subheader("Expenses by Category")
@@ -265,7 +262,6 @@ with tab3:
     st.write("You can directly edit the cells below or delete rows (select the row on the left side and press your keyboard's DELETE key). Don't forget to click 'Save Changes' below.")
     df = load_data()
     if not df.empty:
-        # num_rows="dynamic" allows adding and deleting rows!
         edited_history = st.data_editor(df, num_rows="dynamic", use_container_width=True)
         
         if st.button("Save Changes to History", type="primary"):
