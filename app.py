@@ -37,34 +37,51 @@ with tab1:
     uploaded_file = st.file_uploader("Upload receipt image", type=["jpg", "png", "jpeg"])
     extracted_data = {}
     
-    if uploaded_file is not None:
+if uploaded_file is not None:
         if st.button("Read Receipt with AI"):
             if "GEMINI_API_KEY" not in st.secrets:
                 st.error("API Key is missing in secrets.")
             else:
                 with st.spinner("Analyzing receipt..."):
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    image_parts = [{"mime_type": uploaded_file.type, "data": uploaded_file.getvalue()}]
-                    prompt = """
-                    Analyze this receipt. Return ONLY a valid JSON with the following structure:
-                    {
-                        "merchant": "Name of the store",
-                        "total_amount": 123.45,
-                        "card_number": "Payment Method or Last 4 digits of card",
-                        "items": [{"name": "item name", "price": 10.0}]
-                    }
-                    """
                     try:
+                        # Usamos el modelo estándar actual de visión
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        
+                        image_parts = [{"mime_type": uploaded_file.type, "data": uploaded_file.getvalue()}]
+                        
+                        prompt = """
+                        Analyze this receipt image. Extract the information and output ONLY a valid JSON object with this exact structure, with no extra text or markdown formatting outside of it:
+                        {
+                            "merchant": "Name of the store",
+                            "total_amount": 0.0,
+                            "card_number": "Payment Method or Last 4 digits",
+                            "items": [{"name": "item name", "price": 0.0}]
+                        }
+                        """
+                        
                         response = model.generate_content([prompt, image_parts[0]])
-                        json_str = response.text.strip().replace("```json", "").replace("```", "")
-                        extracted_data = json.loads(json_str)
+                        
+                        # Limpieza robusta del texto devuelto por la IA
+                        text_response = response.text.strip()
+                        if text_response.startswith("```json"):
+                            text_response = text_response[7:]
+                        if text_response.endswith("```"):
+                            text_response = text_response[:-3]
+                            
+                        extracted_data = json.loads(text_response.strip())
                         st.success("Receipt processed successfully!")
                         
-                        # Show items for user to check
+                        # Mostrar los ítems encontrados
                         st.write("**Items found in receipt:**")
-                        st.table(pd.DataFrame(extracted_data.get("items", [])))
+                        items_list = extracted_data.get("items", [])
+                        if items_list:
+                            st.table(pd.DataFrame(items_list))
+                        else:
+                            st.info("No individual items detected, but total amount was read.")
+                            
                     except Exception as e:
-                        st.error("Could not read the receipt automatically. Please enter data manually.")
+                        st.error(f"Could not read the receipt automatically. Error details: {str(e)}")
+                        st.info("Please enter data manually below.")
 
     # Main Expense Form
     st.subheader("2. Expense Details")
