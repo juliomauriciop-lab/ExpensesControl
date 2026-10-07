@@ -24,7 +24,11 @@ CARD_OWNERS = {
 
 def load_data():
     if os.path.exists(DATA_FILE):
-        return pd.read_csv(DATA_FILE)
+        df = pd.read_csv(DATA_FILE)
+        # Si detecta la columna 'Split' de versiones anteriores, la elimina
+        if "Split" in df.columns:
+            df = df.drop(columns=["Split"])
+        return df
     return pd.DataFrame(columns=["Date", "Person", "Category", "Amount", "Merchant", "Note", "Card Number", "Who Paid"])
 
 def save_expense(data):
