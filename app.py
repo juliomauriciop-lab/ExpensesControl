@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
-from datetime import date
+from datetime import date, datetime
 import json
 import os
 import io
@@ -77,12 +77,12 @@ with tab1:
                             model = genai.GenerativeModel('gemini-3.8-flash')
                             image_parts = [{"mime_type": uploaded_file.type, "data": uploaded_file.getvalue()}]
                             
-                            # Se agregó una instrucción estricta sobre los caracteres de control
                             prompt = f"""
                             Analyze this receipt image. Extract the information and output ONLY a valid JSON object with this exact structure, with no extra text or markdown formatting. 
                             IMPORTANT: Do NOT include literal newlines, tabs, or unescaped control characters inside the string values:
                             {{
                                 "merchant": "Name of the store",
+                                "date": "YYYY-MM-DD",
                                 "total_amount": 0.0,
                                 "card_number": "Payment Method or Last 4 digits",
                                 "items": [
@@ -102,7 +102,6 @@ with tab1:
                             if text_response.endswith("```"):
                                 text_response = text_response[:-3]
                                 
-                            # Se agregó strict=False para tolerar caracteres de control invisibles
                             extracted_data = json.loads(text_response.strip(), strict=False)
                             
                             items = extracted_data.get("items", [])
@@ -128,13 +127,22 @@ with tab1:
             
             merchant_val = st.session_state.receipt_data.get('merchant', '')
             card_val = st.session_state.receipt_data.get('card_number', '')
+            receipt_date_str = st.session_state.receipt_data.get('date', '')
+            
+            # Intentar convertir la fecha leída por la IA, si falla usa la fecha de hoy
+            parsed_date = date.today()
+            if receipt_date_str:
+                try:
+                    parsed_date = datetime.strptime(receipt_date_str, "%Y-%m-%d").date()
+                except ValueError:
+                    pass
             
             detected_payer = detect_who_paid(card_val)
             payer_index = PERSONS.index(detected_payer) if detected_payer in PERSONS else 0
             
             col_a, col_b, col_c, col_d = st.columns(4)
             with col_a:
-                exp_date = st.date_input("Receipt Date", date.today())
+                exp_date = st.date_input("Receipt Date", value=parsed_date)
             with col_b:
                 merchant = st.text_input("Merchant", value=merchant_val)
             with col_c:
@@ -195,7 +203,6 @@ with tab1:
                     cat = row.get("category", "Other")
                     assign = row.get("Assign To", "Mariel & Mauricio (split)")
                     
-                    # Se añade una sola fila por ítem sin importar a quién se asigna
                     expenses_to_save.append({
                         "Date": exp_date, 
                         "Person": assign, 
@@ -251,7 +258,6 @@ with tab2:
     df = load_data()
     if not df.empty:
         st.subheader("Total Expenses per Person")
-        # El gráfico ahora mostrará 3 barras: Mariel, Mauricio, y Mariel & Mauricio (split)
         st.bar_chart(df.groupby("Person")["Amount"].sum())
         
         st.subheader("Expenses by Category")
