@@ -11,8 +11,8 @@ if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 DATA_FILE = "expenses.csv"
-PERSONS = ["Mariel", "Mauricio"] # Used for 'Who Paid'
-ASSIGN_OPTIONS = ["Mariel", "Mauricio", "Mariel & Mauricio (split)"] # Used for 'Person'
+PERSONS = ["Mariel", "Mauricio"] 
+ASSIGN_OPTIONS = ["Mariel", "Mauricio", "Mariel & Mauricio (split)"] 
 CATEGORIES = ["Health", "Household items", "Leisure", "Rent", "Studies", "Transport", "Clothes", "Food", "Other"]
 
 # Card mapping dictionary. Add new cards here in the future
@@ -25,9 +25,12 @@ CARD_OWNERS = {
 def load_data():
     if os.path.exists(DATA_FILE):
         df = pd.read_csv(DATA_FILE)
-        # Si detecta la columna 'Split' de versiones anteriores, la elimina
+        # Limpieza de legado
         if "Split" in df.columns:
             df = df.drop(columns=["Split"])
+        # Estandarizar fechas para evitar conflictos en el editor
+        if "Date" in df.columns:
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
         return df
     return pd.DataFrame(columns=["Date", "Person", "Category", "Amount", "Merchant", "Note", "Card Number", "Who Paid"])
 
@@ -42,7 +45,6 @@ def save_multiple_expenses(data_list):
     df.to_csv(DATA_FILE, index=False)
 
 def detect_who_paid(card_number_str):
-    """Detects who paid based on the card number."""
     if card_number_str:
         for card, owner in CARD_OWNERS.items():
             if card in str(card_number_str):
@@ -52,7 +54,6 @@ def detect_who_paid(card_number_str):
 st.set_page_config(page_title="Expense Tracker", layout="wide")
 st.title("Expense Tracker - Mariel & Mauricio")
 
-# Initialize session state for receipt processing
 if "receipt_processed" not in st.session_state:
     st.session_state.receipt_processed = False
 if "receipt_data" not in st.session_state:
@@ -133,7 +134,6 @@ with tab1:
             card_val = st.session_state.receipt_data.get('card_number', '')
             receipt_date_str = st.session_state.receipt_data.get('date', '')
             
-            # Intentar convertir la fecha leída por la IA, si falla usa la fecha de hoy
             parsed_date = date.today()
             if receipt_date_str:
                 try:
@@ -146,7 +146,8 @@ with tab1:
             
             col_a, col_b, col_c, col_d = st.columns(4)
             with col_a:
-                exp_date = st.date_input("Receipt Date", value=parsed_date)
+                # Modificado a DD/MM/YYYY
+                exp_date = st.date_input("Receipt Date", value=parsed_date, format="DD/MM/YYYY")
             with col_b:
                 merchant = st.text_input("Merchant", value=merchant_val)
             with col_c:
@@ -171,7 +172,8 @@ with tab1:
                 st.session_state.receipt_items,
                 column_config={
                     "name": "Item Name",
-                    "price": st.column_config.NumberColumn("Price", format="$%.2f", min_value=0.0),
+                    # Formato en libras esterlinas
+                    "price": st.column_config.NumberColumn("Price", format="£%.2f", min_value=0.0),
                     "category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True),
                     "Assign To": st.column_config.SelectboxColumn("Assign To", options=ASSIGN_OPTIONS, required=True)
                 },
@@ -196,7 +198,7 @@ with tab1:
                     total_mariel += (p / 2)
                     total_mauricio += (p / 2)
                     
-            st.info(f"**Total to register:** Mariel: **${total_mariel:.2f}** | Mauricio: **${total_mauricio:.2f}** | Grand Total: **${total_mariel + total_mauricio:.2f}**")
+            st.info(f"**Total to register:** Mariel: **£{total_mariel:.2f}** | Mauricio: **£{total_mauricio:.2f}** | Grand Total: **£{total_mariel + total_mauricio:.2f}**")
             
             if st.button("Save All Receipt Items as Expenses", type="primary"):
                 expenses_to_save = []
@@ -231,13 +233,14 @@ with tab1:
         with st.form("expense_form"):
             col1, col2 = st.columns(2)
             with col1:
-                exp_date = st.date_input("Date", date.today())
+                # Modificado a DD/MM/YYYY
+                exp_date = st.date_input("Date", date.today(), format="DD/MM/YYYY")
                 person = st.selectbox("Person (Who does this expense belong to?)", ASSIGN_OPTIONS)
                 category = st.selectbox("Category", CATEGORIES)
                 merchant = st.text_input("Merchant")
                 note = st.text_input("Note")
             with col2:
-                amount = st.number_input("Amount", min_value=0.0, step=0.01)
+                amount = st.number_input("Amount (£)", min_value=0.0, step=0.01)
                 card_number = st.text_input("Card Number / Payment Method")
                 who_paid = st.selectbox("Who Paid?", PERSONS)
                 
@@ -261,25 +264,98 @@ with tab2:
     st.header("Dashboard & Visualizations")
     df = load_data()
     if not df.empty:
-        st.subheader("Total Expenses per Person")
-        st.bar_chart(df.groupby("Person")["Amount"].sum())
+        # Slicer visual
+        st.write("📊 **Filters**")
+        selected_person = st.selectbox("Filter charts by Person", ["All", "Mariel", "Mauricio"])
         
-        st.subheader("Expenses by Category")
-        category_totals = df.groupby(["Person", "Category"])["Amount"].sum().unstack()
-        st.bar_chart(category_totals)
+        # Procesar los datos para dividir equitativamente los splits en los gráficos
+        eff_df_list = []
+        for _, row in df.iterrows():
+            if row["Person"] == "Mariel & Mauricio (split)":
+                r1 = row.copy()
+                r1["Person"] = "Mariel"
+                r1["Amount"] = float(row["Amount"]) / 2
+                
+                r2 = row.copy()
+                r2["Person"] = "Mauricio"
+                r2["Amount"] = float(row["Amount"]) / 2
+                
+                eff_df_list.extend([r1, r2])
+            else:
+                eff_df_list.append(row)
+                
+        eff_df = pd.DataFrame(eff_df_list)
+        
+        # Aplicar el filtro seleccionado
+        if selected_person != "All":
+            plot_df = eff_df[eff_df["Person"] == selected_person]
+        else:
+            plot_df = eff_df
+            
+        st.subheader(f"Total Expenses ({'All' if selected_person == 'All' else selected_person})")
+        st.caption("Note: 'Split' expenses are automatically divided 50/50 between Mariel and Mauricio for accurate chart representation.")
+        
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            st.bar_chart(plot_df.groupby("Person")["Amount"].sum())
+            
+        with col_c2:
+            if selected_person == "All":
+                category_totals = plot_df.groupby(["Person", "Category"])["Amount"].sum().unstack()
+                st.bar_chart(category_totals)
+            else:
+                category_totals = plot_df.groupby("Category")["Amount"].sum()
+                st.bar_chart(category_totals)
     else:
         st.info("No expenses recorded yet.")
 
 with tab3:
     st.header("Expense History")
-    st.write("You can directly edit the cells below or delete rows (select the row on the left side and press your keyboard's DELETE key). Don't forget to click 'Save Changes' below.")
     df = load_data()
     if not df.empty:
-        edited_history = st.data_editor(df, num_rows="dynamic", use_container_width=True)
+        # Slicer de persona para el historial
+        filter_person = st.selectbox("Filter History by Person", ["All"] + ASSIGN_OPTIONS)
+        
+        if filter_person != "All":
+            display_df = df[df["Person"] == filter_person].copy()
+        else:
+            display_df = df.copy()
+            
+        st.write("✏️ You can edit the cells below or delete rows. Click 'Save Changes' below when finished.")
+        
+        edited_history = st.data_editor(
+            display_df, 
+            num_rows="dynamic", 
+            use_container_width=True,
+            column_config={
+                "Date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),
+                "Amount": st.column_config.NumberColumn("Amount", format="£%.2f")
+            }
+        )
         
         if st.button("Save Changes to History", type="primary"):
-            edited_history.to_csv(DATA_FILE, index=False)
+            if filter_person != "All":
+                original_df = df.copy()
+                
+                # Remover del dataframe global lo que se borró en el filtro actual
+                deleted_indices = set(display_df.index) - set(edited_history.index)
+                original_df = original_df.drop(index=deleted_indices)
+                
+                # Actualizar celdas modificadas usando el índice
+                modified_rows = edited_history[edited_history.index.isin(original_df.index)]
+                original_df.update(modified_rows)
+                
+                # Agregar cualquier fila nueva 
+                new_rows = edited_history[~edited_history.index.isin(original_df.index)]
+                if not new_rows.empty:
+                    original_df = pd.concat([original_df, new_rows])
+                    
+                original_df.to_csv(DATA_FILE, index=False)
+            else:
+                edited_history.to_csv(DATA_FILE, index=False)
+                
             st.success("History updated successfully!")
+            st.rerun()
     else:
         st.info("No expenses recorded yet.")
 
