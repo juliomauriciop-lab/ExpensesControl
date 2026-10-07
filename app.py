@@ -45,7 +45,7 @@ with tab1:
                     with st.spinner("Analyzing receipt..."):
                         try:
                             # Usamos el modelo estándar actual de visión
-                            model = genai.GenerativeModel('gemini-1.5-flash')
+                            model = genai.GenerativeModel('gemini-1.5-flash-latest')
                             
                             image_parts = [{"mime_type": uploaded_file.type, "data": uploaded_file.getvalue()}]
                             
