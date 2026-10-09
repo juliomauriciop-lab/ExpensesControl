@@ -3,19 +3,20 @@ import pandas as pd
 import google.generativeai as genai
 from datetime import date, datetime
 import json
-import os
 import io
+from streamlit_gsheets import GSheetsConnection
 
-# Setup Gemini API (The key will be stored in Streamlit Cloud Secrets)
+# Setup Gemini API
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-DATA_FILE = "expenses.csv"
+# Setup Google Sheets Connection
+conn = st.connection("gsheets", type=GSheetsConnection)
+
 PERSONS = ["Mariel", "Mauricio"] 
 ASSIGN_OPTIONS = ["Mariel", "Mauricio", "Mariel & Mauricio (split)"] 
 CATEGORIES = ["Health", "Household items", "Leisure", "Rent", "Studies", "Transport", "Clothes", "Food", "Other"]
 
-# Card mapping dictionary. Add new cards here in the future
 CARD_OWNERS = {
     "7931": "Mauricio",
     "2090": "Mauricio",
@@ -23,26 +24,33 @@ CARD_OWNERS = {
 }
 
 def load_data():
-    if os.path.exists(DATA_FILE):
-        df = pd.read_csv(DATA_FILE)
-        # Limpieza de legado
-        if "Split" in df.columns:
-            df = df.drop(columns=["Split"])
-        # Estandarizar fechas para evitar conflictos en el editor
+    try:
+        # Lee las primeras 8 columnas de la hoja "Expenses"
+        df = conn.read(worksheet="Expenses", usecols=list(range(8)))
+        df = df.dropna(how="all")
         if "Date" in df.columns:
             df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
+        if df.empty or len(df.columns) < 8:
+            return pd.DataFrame(columns=["Date", "Person", "Category", "Amount", "Merchant", "Note", "Card Number", "Who Paid"])
         return df
-    return pd.DataFrame(columns=["Date", "Person", "Category", "Amount", "Merchant", "Note", "Card Number", "Who Paid"])
+    except Exception as e:
+        return pd.DataFrame(columns=["Date", "Person", "Category", "Amount", "Merchant", "Note", "Card Number", "Who Paid"])
+
+def save_data_to_sheet(df):
+    df_upload = df.copy()
+    if "Date" in df_upload.columns:
+        df_upload["Date"] = df_upload["Date"].astype(str)
+    conn.update(worksheet="Expenses", data=df_upload)
 
 def save_expense(data):
     df = load_data()
     df = pd.concat([df, pd.DataFrame([data])], ignore_index=True)
-    df.to_csv(DATA_FILE, index=False)
+    save_data_to_sheet(df)
 
 def save_multiple_expenses(data_list):
     df = load_data()
     df = pd.concat([df, pd.DataFrame(data_list)], ignore_index=True)
-    df.to_csv(DATA_FILE, index=False)
+    save_data_to_sheet(df)
 
 def detect_who_paid(card_number_str):
     if card_number_str:
@@ -146,7 +154,6 @@ with tab1:
             
             col_a, col_b, col_c, col_d = st.columns(4)
             with col_a:
-                # Modificado a DD/MM/YYYY
                 exp_date = st.date_input("Receipt Date", value=parsed_date, format="DD/MM/YYYY")
             with col_b:
                 merchant = st.text_input("Merchant", value=merchant_val)
@@ -172,7 +179,6 @@ with tab1:
                 st.session_state.receipt_items,
                 column_config={
                     "name": "Item Name",
-                    # Formato en libras esterlinas
                     "price": st.column_config.NumberColumn("Price", format="£%.2f", min_value=0.0),
                     "category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True),
                     "Assign To": st.column_config.SelectboxColumn("Assign To", options=ASSIGN_OPTIONS, required=True)
@@ -233,7 +239,6 @@ with tab1:
         with st.form("expense_form"):
             col1, col2 = st.columns(2)
             with col1:
-                # Modificado a DD/MM/YYYY
                 exp_date = st.date_input("Date", date.today(), format="DD/MM/YYYY")
                 person = st.selectbox("Person (Who does this expense belong to?)", ASSIGN_OPTIONS)
                 category = st.selectbox("Category", CATEGORIES)
@@ -264,11 +269,9 @@ with tab2:
     st.header("Dashboard & Visualizations")
     df = load_data()
     if not df.empty:
-        # Slicer visual
         st.write("📊 **Filters**")
         selected_person = st.selectbox("Filter charts by Person", ["All", "Mariel", "Mauricio"])
         
-        # Procesar los datos para dividir equitativamente los splits en los gráficos
         eff_df_list = []
         for _, row in df.iterrows():
             if row["Person"] == "Mariel & Mauricio (split)":
@@ -286,7 +289,6 @@ with tab2:
                 
         eff_df = pd.DataFrame(eff_df_list)
         
-        # Aplicar el filtro seleccionado
         if selected_person != "All":
             plot_df = eff_df[eff_df["Person"] == selected_person]
         else:
@@ -307,13 +309,12 @@ with tab2:
                 category_totals = plot_df.groupby("Category")["Amount"].sum()
                 st.bar_chart(category_totals)
     else:
-        st.info("No expenses recorded yet.")
+        st.info("No expenses recorded yet in Google Sheets.")
 
 with tab3:
     st.header("Expense History")
     df = load_data()
     if not df.empty:
-        # Slicer de persona para el historial
         filter_person = st.selectbox("Filter History by Person", ["All"] + ASSIGN_OPTIONS)
         
         if filter_person != "All":
@@ -337,27 +338,24 @@ with tab3:
             if filter_person != "All":
                 original_df = df.copy()
                 
-                # Remover del dataframe global lo que se borró en el filtro actual
                 deleted_indices = set(display_df.index) - set(edited_history.index)
                 original_df = original_df.drop(index=deleted_indices)
                 
-                # Actualizar celdas modificadas usando el índice
                 modified_rows = edited_history[edited_history.index.isin(original_df.index)]
                 original_df.update(modified_rows)
                 
-                # Agregar cualquier fila nueva 
                 new_rows = edited_history[~edited_history.index.isin(original_df.index)]
                 if not new_rows.empty:
                     original_df = pd.concat([original_df, new_rows])
                     
-                original_df.to_csv(DATA_FILE, index=False)
+                save_data_to_sheet(original_df)
             else:
-                edited_history.to_csv(DATA_FILE, index=False)
+                save_data_to_sheet(edited_history)
                 
-            st.success("History updated successfully!")
+            st.success("History updated successfully in Google Sheets!")
             st.rerun()
     else:
-        st.info("No expenses recorded yet.")
+        st.info("No expenses recorded yet in Google Sheets.")
 
 with tab4:
     st.header("Export Data")
