@@ -25,8 +25,8 @@ CARD_OWNERS = {
 
 def load_data():
     try:
-        # Lee las primeras 8 columnas de la hoja "Expenses"
-        df = conn.read(worksheet="Expenses", usecols=list(range(8)))
+        # ttl=0 obliga a Streamlit a descargar siempre la versión en vivo de Google Sheets, ignorando la caché
+        df = conn.read(worksheet="Expenses", usecols=list(range(8)), ttl=0)
         df = df.dropna(how="all")
         if "Date" in df.columns:
             df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
@@ -40,7 +40,12 @@ def save_data_to_sheet(df):
     df_upload = df.copy()
     if "Date" in df_upload.columns:
         df_upload["Date"] = df_upload["Date"].astype(str)
+    
+    # Sobrescribe el sheet con la data actualizada
     conn.update(worksheet="Expenses", data=df_upload)
+    
+    # Limpia cualquier caché residual en la memoria de la app
+    st.cache_data.clear()
 
 def save_expense(data):
     df = load_data()
