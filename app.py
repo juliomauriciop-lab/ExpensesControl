@@ -5,6 +5,7 @@ from datetime import date, datetime
 import calendar
 import json
 import io
+import plotly.express as px
 from streamlit_gsheets import GSheetsConnection
 
 # Setup Gemini API
@@ -332,14 +333,27 @@ with tab2:
                     st.info("Not enough data for line chart.")
             with col_c2:
                 st.subheader("Expenses by Category")
-                if selected_person == "All":
-                    st.bar_chart(plot_df.groupby(["Person", "Category"])["Amount"].sum().unstack())
+                
+                # Agrupamos solo por categoría para sumar los totales, sin importar si es All, Mariel o Mauricio
+                category_totals = plot_df.groupby("Category")["Amount"].sum().reset_index()
+                
+                if not category_totals.empty:
+                    # Crear el Pie Chart con diseño de dona (hole=0.4)
+                    fig = px.pie(
+                        category_totals, 
+                        values='Amount', 
+                        names='Category', 
+                        hole=0.4,
+                        color_discrete_sequence=px.colors.qualitative.Pastel
+                    )
+                    
+                    # Ocultar la leyenda lateral y mostrar porcentajes y nombres dentro del gráfico
+                    fig.update_traces(textposition='inside', textinfo='percent+label')
+                    fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
+                    
+                    st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.bar_chart(plot_df.groupby("Category")["Amount"].sum())
-        else:
-            st.info("No expenses recorded for this month.")
-    else:
-        st.info("No expenses recorded yet in Google Sheets.")
+                    st.info("No data for pie chart.")
 
 with tab3:
     st.header("Expense History")
