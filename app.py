@@ -312,21 +312,21 @@ with tab2:
             with col_c1:
                 st.subheader("Cumulative Expenses (Daily)")
                 
-                # Ordenar por fecha para calcular el acumulado correctamente
                 line_df = plot_df.copy().sort_values("Date")
                 
                 if not line_df.empty:
                     if selected_person == "All":
-                        # Agrupar por fecha y persona, luego pivotear para tener múltiples líneas
                         daily_sum = line_df.groupby(["Date", "Person"])["Amount"].sum().reset_index()
                         daily_pivot = daily_sum.pivot(index="Date", columns="Person", values="Amount").fillna(0)
                         cumulative_df = daily_pivot.cumsum()
                     else:
-                        # Agrupar solo por fecha para la persona seleccionada
                         daily_sum = line_df.groupby("Date")["Amount"].sum().reset_index()
                         daily_sum = daily_sum.set_index("Date")
                         cumulative_df = daily_sum.cumsum()
                         
+                    # Convertir el eje X a texto (Día/Mes) para eliminar las horas
+                    cumulative_df.index = cumulative_df.index.strftime('%d/%m')
+                    
                     st.line_chart(cumulative_df)
                 else:
                     st.info("Not enough data for line chart.")
