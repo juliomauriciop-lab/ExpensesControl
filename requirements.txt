@@ -3,3 +3,4 @@ pandas
 google-generativeai
 openpyxl
 st-gsheets-connection
+plotly
